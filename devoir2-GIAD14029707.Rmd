@@ -1,0 +1,1740 @@
+---
+title: "Devoir 2 - Régression Logisitique (GLM)"
+author: "DANIEL GIAO (GIAD14029707)"
+date: "01/05/2020"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    keep_md: true
+---
+# INTRODUCTION
+Nous avons à notre disposition, cette fois-ci, un ensemble de données sur des maisons vendues et encore une fois, nous voulons mettre en œuvre, sur ces vraies données, les techniques exposées dans les capsules vidéo du cours. Toutefois, la variable à expliquer est maintenant une variable dichotomique, c’est-à-dire, cette dernière est de nature qualitative et ne peut prendre que deux modalités possibles, par exemple « TRUE » ou « FALSE ». Autrement dit, au lieu de faire une prédiction sur une variable continue ou discrète, comme dans le cas du premier TP lorsque nous devons prédire la moyenne par habitant (100 000) de décès par cancer, nous devons prévoir cette fois-ci, en l’occurrence, la probabilité que les maisons vendues soient munies « Oui » ou « Non » d’un foyer. De plus, les observations tirées de cette base de données peuvent également être représentées graphiquement par un nuage de point. Cependant, contrairement au premier TP, nous ne s’intéresserons plus à tracer la droite linéaire qui s’ajuste le mieux possible à ce nuage de points. En revanche, nous s’intéresserons plutôt à tracer une courbe sigmoïde ayant la forme d’un « s » permettant de capturer les valeurs de « 0 » et de « 1 » qui s’ajuste le mieux possible à ce nuage de points. De ce fait, l’objectif principale du deuxième devoir de STT5100 est axé sur la construction d’un modèle de régression binomiale et plus précisément, une régression logistique. En effet, la régression logistique est un cas particulier de modèle linéaire généralisé (GLM). Par ailleurs, Il est crucial de préciser que la régression logistique ne consiste pas à modéliser la variable d’intérêt Y, mais plutôt la probabilité que celle-ci se réalise. Dans le cadre du projet, nous présenterons, en premier lieu, les variables qui pourraient potentiellement être intéressantes pour la construction du modèle. En deuxième lieu, nous expliquerons comment nous sommes parvenus, d’une part, à l’amélioration d’un modèle simple. D’autre part, nous allons également expliquer la méthode exploitée permettant de construire parallèlement un second modèle plus complexe et d’illustrer les moyens de le simplifier. En dernier lieu, nous comparerons les courbes ROC, ainsi que les valeurs AUC des deux modèles obtenus.
+
+# PARTIE I
+Dans cette partie exploratoire, nous présenterons les variables qui pourraient potentiellement être intéressantes pour la construction du modèle. Dans un premier temps, nous allons d’abord nous focaliser sur la base de données fournies. La base de données contient 723 observations sur des maisons vendues et 40 variables. Plus précisément, foyer est la variable d’intérêt et nous lui attribuons une valeur de « 1 » si la maison vendue possède effectivement un foyer et une valeur de « 0 », dans le cas contraire.
+    
+```{r}
+code_permanent = "GIAD14029707"
+loc_fichier = paste("http://freakonometrics.free.fr/",code_permanent,"H2020D2.RData",sep="")
+download.file(loc_fichier, "base_devoir_2.RData")
+load("base_devoir_2.RData")
+dim(database)
+str(database)
+table(database$foyer)
+
+DF=database
+```
+
+## (1.1) SÉLECTION DE VARIABLES EXPLICATIVES INTÉRESSANTES 
+
+Dans un deuxième temps, nous allons procéder à la sélection des variables explicatives. Pour se faire, nous allons commencer par le traitement des variables qualitatives et par la suite, les variables quantitatives.
+
+Parmi les 39 autres variables explicatives, nous avons vingt-trois variables catégorielles. En effet, ces deux variables de type catégorielle comportent individuellement plusieurs modalités et nous pose certes un véritable problème parce que chaque modalité nous ajoute une variable explicative de plus à considérer pour la modélisation. Par exemple, la variable Zone contient 7 modalités et par conséquent, nous devons considérer 7 variables explicatives de plus. Pour y remédier, nous allons les regrouper efficacement les modalités afin de simplifier la procédure de sélection de variables explicatives à l’aide des boîtes à moustaches et du test de Wald.
+
+### (1.1.1) Zone 
+
+Afin d’obtenir la visualisation la plus nette possible à notre boîte à moustaches, nous avons commencé par réordonner les modalités en prenant comme référence la zone ayant pas de foyer. Plus précisément, la zone C est notre modalité de référence.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Zone),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Zone= factor(DF$Zone, level=L)
+with(data = DF, boxplot(foyer~Zone,cex=.5,col=grey(.8)))
+
+reg_Zone = glm(foyer~Zone,data = DF,family = binomial(link = "logit"))
+summary(reg_Zone)
+```
+
+Nous allons effectuer un test multiple afin de tester si les 3 zones suivants ont effectivement des coefficients nuls dans la régression logistique : RM, FV et RH. De ce fait, nous allons procéder avec un test de Wald. Le statistique de Wald est faible avec une p-value de 0.8023. Nous allons donc regrouper ces trois modalités.
+
+```{r}
+library(car)
+linearHypothesis(reg_Zone, c("ZoneRM = 0",
+                              "ZoneFV = 0",
+                              "ZoneRH = 0"))
+
+levels(DF$Zone) = c(rep("A",4),"B")
+DF$Zone = relevel(DF$Zone,"A")
+with(data = DF, boxplot(foyer~Zone,cex=.5,col=grey(.8)))
+reg_Zone = glm(foyer~Zone,data = DF,family = binomial(link = "logit"))
+summary(reg_Zone)
+
+```
+
+Enfin, nous avons réussi à réduire le nombre de modalités pour la variable Zone et nous nous retrouvons avec les deux sous-groupes suivants : ZoneA et ZoneB. Par ailleurs, nous constatons qu’elle s’avère très significative dans la régression logistique. De ce fait, la variable Zone est intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle. 
+
+Où 
+
+ZoneA = {C, RM, FV, RH}
+
+ZoneB = {RL}
+
+### (1.1.2) Forme
+
+Par la suite, nous allons procéder au regroupement de la variable Forme similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Forme),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Forme= factor(DF$Forme, level=L)
+with(data = DF, boxplot(foyer~Forme,cex=.5,col=grey(.8)))
+
+reg_Forme = glm(foyer~Forme,data = DF,family = binomial(link = "logit"))
+summary(reg_Forme)
+
+DF$Forme = relevel(DF$Forme,"IR2")
+with(data = DF, boxplot(foyer~Forme,cex=.5,col=grey(.8)))
+reg_Forme = glm(foyer~Forme,data = DF,family = binomial(link = "logit"))
+summary(reg_Forme)
+
+library(car)
+linearHypothesis(reg_Forme, c("FormeIR3 = 0",
+                              "FormeIR1 = 0"))
+
+levels(DF$Forme) = c("A","B",rep("A",2))
+DF$Forme = relevel(DF$Forme,"A")
+with(data = DF, boxplot(foyer~Forme,cex=.5,col=grey(.8)))
+reg_Forme = glm(foyer~Forme,data = DF,family = binomial(link = "logit"))
+summary(reg_Forme)
+
+```
+
+Ainsi, nous avons réussi à réduire le nombre de modalités pour la variable Forme et nous nous retrouvons avec les deux sous-groupes suivants : FormeA et FormeB. Par ailleurs, nous constatons qu’elle s’avère très significative dans la régression logistique. De ce fait, la variable Forme est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle. 
+
+Où 
+
+FormeA = {IR1, IR2, IR3}
+
+FormeB = {Reg}
+
+### (1.1.3) Utilities
+
+Nous n’avons pas procédé au regroupement des modalités de la variable Utilities, car il n’y avait que deux modalités et donc, ce n’était pas nécessaire.
+
+```{r}
+with(data = DF, boxplot(foyer~Utilities,cex=.5,col=grey(.8)))
+A = with(data = DF, aggregate(foyer,by=list(Utilities),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Utilities= factor(DF$Utilities, level=L)
+with(data = DF, boxplot(foyer~Utilities,cex=.5,col=grey(.8)))
+
+reg_Utilies = glm(foyer~Utilities,data = DF,family = binomial(link = "logit"))
+summary(reg_Utilies)
+```
+
+Enfin, nous constatons que la variable Utilities ne s’avère pas significative dans la régression logistique. Par conséquent, la variable Utilities n’est pas intéressante en raison de p-value trop élevé et nous n’allons pas la retenir pour la construction du modèle. 
+
+### (1.1.4) Configuration
+
+Encore une fois, nous allons procéder au regroupement de la variable Configuration similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Configuration),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Configuration= factor(DF$Configuration, level=L)
+with(data = DF, boxplot(foyer~Configuration,cex=.5,col=grey(.8)))
+reg_Configuration  = glm(foyer~Configuration ,data = DF,family = binomial(link = "logit"))
+summary(reg_Configuration )
+
+library(car)
+linearHypothesis(reg_Configuration, c("ConfigurationFR3  = 0"))
+
+levels(DF$Configuration) = c(rep("A",2),"B","C","D")
+DF$Configuration = relevel(DF$Configuration,"B")
+with(data = DF, boxplot(foyer~Configuration,cex=.5,col=grey(.8)))
+reg_Configuration = glm(foyer~Configuration,data = DF,family = binomial(link = "logit"))
+summary(reg_Configuration)
+
+library(car)
+linearHypothesis(reg_Configuration, c("ConfigurationC  = 0"))
+
+levels(DF$Configuration) = c("B","A","B","D")
+DF$Configuration = relevel(DF$Configuration,"D")
+with(data = DF, boxplot(foyer~Configuration,cex=.5,col=grey(.8)))
+reg_Configuration = glm(foyer~Configuration,data = DF,family = binomial(link = "logit"))
+summary(reg_Configuration)
+
+```
+
+Ainsi, nous avons réussi à réduire le nombre de modalités pour la variable Configuration et nous nous retrouvons avec les trois sous-groupes suivants : ConfigurationA, ConfigurationB et ConfigurationD. Par ailleurs, nous constatons qu’elle s’avère significative dans la régression logistique. De ce fait, la variable Configuration est intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle. 
+
+Où 
+
+ConfigurationA = {FR2, FR3}
+
+ConfigurationB = {Corner, Inside}
+
+ConfigurationD = {CulDSac}
+
+### (1.1.5) Proxim_1
+
+Par la suite, nous allons procéder au regroupement de la variable Proxim_1 similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Proxim_1),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Proxim_1= factor(DF$Proxim_1, level=L)
+with(data = DF, boxplot(foyer~Proxim_1,cex=.5,col=grey(.8)))
+
+reg_Proxim_1  = glm(foyer~Proxim_1 ,data = DF,family = binomial(link = "logit"))
+summary(reg_Proxim_1 )
+
+library(car)
+linearHypothesis(reg_Proxim_1, c("Proxim_1RRAe  = 0",
+                                 "Proxim_1Feedr = 0",
+                                 "Proxim_1RRAn = 0"))
+
+levels(DF$Proxim_1) = c(rep("A",4),"B","C","D")
+DF$Proxim_1 = relevel(DF$Proxim_1,"B")
+with(data = DF, boxplot(foyer~Proxim_1,cex=.5,col=grey(.8)))
+reg_Proxim_1 = glm(foyer~Proxim_1,data = DF,family = binomial(link = "logit"))
+summary(reg_Proxim_1)
+
+library(car)
+linearHypothesis(reg_Proxim_1, c("Proxim_1C  = 0",
+                                 "Proxim_1D = 0"))
+
+levels(DF$Proxim_1) = c("B","A",rep("B",2))
+DF$Proxim_1 = relevel(DF$Proxim_1,"A")
+with(data = DF, boxplot(foyer~Proxim_1,cex=.5,col=grey(.8)))
+reg_Proxim_1 = glm(foyer~Proxim_1,data = DF,family = binomial(link = "logit"))
+summary(reg_Proxim_1)
+```
+
+Ainsi, nous avons réussi à réduire le nombre de modalités pour la variable Proxim_1 et nous nous retrouvons avec les deux sous-groupes suivants : Proxim_1A, Proxim_1B. Par ailleurs, nous constatons la variable Proxim_1 est n’est pas trop intéressante en raison de sa p-value légèrement élevée. Cependant, nous avons néanmoins décidé de la retenir au cas où elle pourrait soudainement devenir pertinente lorsqu’elle est combinée avec d’autres variables explicatives lors de la construction du modèle.
+
+Où 
+
+Proxim_1A = {Artery, RRAe, Feedr, RRAn}
+
+Proxim_1B = {Norm, PosN, PosA}
+
+### (1.1.6) Proxim_2
+
+Ensuite, nous allons procéder au regroupement de la variable Proxim_2 similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Proxim_2),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Proxim_2= factor(DF$Proxim_2, level=L)
+with(data = DF, boxplot(foyer~Proxim_2,cex=.5,col=grey(.8)))
+
+reg_Proxim_2  = glm(foyer~Proxim_2 ,data = DF,family = binomial(link = "logit"))
+summary(reg_Proxim_2 )
+
+library(car)
+linearHypothesis(reg_Proxim_2, c("Proxim_2Feedr = 0"))
+
+levels(DF$Proxim_2) = c(rep("A",2),"B","C","D","E")
+DF$Proxim_2 = relevel(DF$Proxim_2,"B")
+with(data = DF, boxplot(foyer~Proxim_2,cex=.5,col=grey(.8)))
+reg_Proxim_2 = glm(foyer~Proxim_2,data = DF,family = binomial(link = "logit"))
+summary(reg_Proxim_2)
+
+library(car)
+linearHypothesis(reg_Proxim_2, c("Proxim_2C = 0",
+                                  "Proxim_2D = 0",
+                                  "Proxim_2E = 0"))
+
+levels(DF$Proxim_2) = c("B","A",rep("B",3))
+DF$Proxim_2 = relevel(DF$Proxim_2,"A")
+with(data = DF, boxplot(foyer~Proxim_2,cex=.5,col=grey(.8)))
+reg_Proxim_2 = glm(foyer~Proxim_2,data = DF,family = binomial(link = "logit"))
+summary(reg_Proxim_2)                 
+```
+
+Enfin, nous avons réussi à réduire le nombre de modalités pour la variable Proxim_2 et nous nous retrouvons avec les deux sous-groupes suivants : Proxim_2A, Proxim_2B. Par ailleurs, nous constatons qu’elle ne s’avère pas significative dans la régression logistique. Par conséquent, la variable Proxim_2 n’est pas intéressante en raison de sa p-value trop élevée et nous n’allons pas la retenir pour la construction du modèle. 
+
+Où 
+
+Proxim_2A = {Artery, Feedr }
+
+Proxim_2B = {Norm, PosN, PosA, RRAe}
+
+
+### (1.1.7) Logement 
+
+Par la suite, nous allons procéder au regroupement de la variable Logement similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Logement),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Logement= factor(DF$Logement, level=L)
+with(data = DF, boxplot(foyer~Logement,cex=.5,col=grey(.8)))
+
+reg_Logement  = glm(foyer~Logement ,data = DF,family = binomial(link = "logit"))
+summary(reg_Logement )
+
+library(car)
+linearHypothesis(reg_Logement, c("Logement2fmCon = 0",
+                                      "LogementTwnhs = 0"))
+levels(DF$Logement) = c(rep("A",3),"B","C")
+DF$Logement = relevel(DF$Logement,"B")
+with(data = DF, boxplot(foyer~Logement,cex=.5,col=grey(.8)))
+reg_Logement = glm(foyer~Logement,data = DF,family = binomial(link = "logit"))
+summary(reg_Logement)
+
+library(car)
+linearHypothesis(reg_Logement, c("LogementC = 0"))
+levels(DF$Logement) = c("B","A","B")
+DF$Logement = relevel(DF$Logement,"A")
+with(data = DF, boxplot(foyer~Logement,cex=.5,col=grey(.8)))
+reg_Logement = glm(foyer~Logement,data = DF,family = binomial(link = "logit"))
+summary(reg_Logement)
+```
+Enfin, nous avons réussi à réduire le nombre de modalités pour la variable Logement et nous nous retrouvons avec les deux sous-groupes suivants : LogementA, LogementB. Par ailleurs, nous constatons qu’elle s’avère significative dans la régression logistique. De ce fait, la variable Logement est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+Où 
+
+LogementA = {Buplex, 2fmCon, Twnhs}
+
+LogementB = {1Fam, TwnhsE}
+
+### (1.1.8) Style
+
+Encore une fois, nous allons procéder au regroupement de la variable Style similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Style),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Style= factor(DF$Style, level=L)
+with(data = DF, boxplot(foyer~Style,cex=.5,col=grey(.8)))
+
+reg_Style = glm(foyer~Style ,data = DF,family = binomial(link = "logit"))
+summary(reg_Style)
+
+library(car)
+linearHypothesis(reg_Style, c("StyleSFoyer = 0",
+                                  "Style1.5Fin = 0",
+                                  "Style1Story = 0"))
+
+levels(DF$Style) = c(rep("A",4),"B","C","D","E")
+DF$Style = relevel(DF$Style,"B")
+with(data = DF, boxplot(foyer~Style,cex=.5,col=grey(.8)))
+reg_Style = glm(foyer~Style ,data = DF,family = binomial(link = "logit"))
+summary(reg_Style)
+
+library(car)
+linearHypothesis(reg_Style, c("StyleC = 0",
+                              "StyleD = 0",
+                              "StyleE = 0"))
+
+levels(DF$Style) = c("B","A",rep("B",3))
+DF$Style = relevel(DF$Style,"B")
+with(data = DF, boxplot(foyer~Style,cex=.5,col=grey(.8)))
+reg_Style = glm(foyer~Style ,data = DF,family = binomial(link = "logit"))
+summary(reg_Style)
+```
+Enfin, nous avons réussi à réduire le nombre de modalités pour la variable Style et nous nous retrouvons avec les deux sous-groupes suivants : StyleA, StyleB. Par ailleurs, nous constatons qu’elle s’avère significative dans la régression logistique. De ce fait, la variable Style est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+Où 
+
+StyleA = {1.5Unf, SFoyer, 1.5Fin, 1Story}
+
+StyleB = {2Story, SLvl, 2.5Unf, 2.5Fin}
+
+
+### (1.1.9) Toit
+
+Par la suite, nous allons procéder au regroupement de la variable Toit similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Toit),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Toit= factor(DF$Toit, level=L)
+with(data = DF, boxplot(foyer~Toit,cex=.5,col=grey(.8)))
+
+reg_Toit = glm(foyer~Toit,data = DF,family = binomial(link = "logit"))
+summary(reg_Toit )
+
+library(car)
+linearHypothesis(reg_Toit, c("ToitGable = 0",
+                             "ToitGambrel = 0"))
+
+levels(DF$Toit) = c(rep("A",3),"B","C","D")
+DF$Toit = relevel(DF$Toit,"B")
+with(data = DF, boxplot(foyer~Toit,cex=.5,col=grey(.8)))
+reg_Toit = glm(foyer~Toit ,data = DF,family = binomial(link = "logit"))
+summary(reg_Toit)
+
+library(car)
+linearHypothesis(reg_Toit, c("ToitC = 0",
+                             "ToitD = 0"))
+levels(DF$Toit) = c("B","A",rep("B",2))
+DF$Toit = relevel(DF$Toit,"B")
+with(data = DF, boxplot(foyer~Toit,cex=.5,col=grey(.8)))
+reg_Toit = glm(foyer~Toit ,data = DF,family = binomial(link = "logit"))
+summary(reg_Toit)
+```
+Enfin, nous avons réussi à réduire le nombre de modalités pour la variable Toit et nous nous retrouvons avec les deux sous-groupes suivants : ToitA, ToitB. Par ailleurs, nous constatons qu’elle s’avère significative dans la régression logistique. De ce fait, la variable Toit est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+Où 
+
+ToitA = {Mansard, Gable, Gambrel}
+
+ToitB = {Hip, Shed, Flat}
+
+### (1.1.10) Exterieur
+
+Encore une fois, nous allons procéder au regroupement de la variable Exterieur similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Exterieur),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Exterieur= factor(DF$Exterieur, level=L)
+with(data = DF, boxplot(foyer~Exterieur,cex=.5,col=grey(.8)))
+
+reg_Exterieur = glm(foyer~Exterieur,data = DF,family = binomial(link = "logit"))
+summary(reg_Exterieur)
+
+library(car)
+linearHypothesis(reg_Exterieur, c("ExterieurMetalSd = 0",
+                             "ExterieurAsbShng = 0",
+                             "ExterieurHdBoard = 0",
+                             "ExterieurCemntBd = 0"))
+levels(DF$Exterieur) = c(rep("A",5),"B","C","D","E","F","G","H")
+DF$Exterieur = relevel(DF$Exterieur,"B")
+with(data = DF, boxplot(foyer~Exterieur,cex=.5,col=grey(.8)))
+reg_Exterieur = glm(foyer~Exterieur,data = DF,family = binomial(link = "logit"))
+summary(reg_Exterieur)
+
+library(car)
+linearHypothesis(reg_Exterieur, c("ExterieurC = 0",
+                             "ExterieurD = 0",
+                             "ExterieurE = 0",
+                             "ExterieurF = 0",
+                             "ExterieurG = 0",
+                             "ExterieurH = 0"))
+levels(DF$Exterieur) = c("B","A",rep("B",6))
+DF$Exterieur = relevel(DF$Exterieur,"A")
+with(data = DF, boxplot(foyer~Exterieur,cex=.5,col=grey(.8)))
+reg_Exterieur = glm(foyer~Exterieur,data = DF,family = binomial(link = "logit"))
+summary(reg_Exterieur)
+```
+Enfin, nous avons réussi à réduire le nombre de modalités pour la variable Extérieur et nous nous retrouvons avec les deux sous-groupes suivants : ExterieurA, ExterieurB. Par ailleurs, nous constatons qu’elle s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+### (1.1.11) Maconnerie
+
+Ensuite, nous allons procéder au regroupement de la variable Maconnerie similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Maconnerie),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Maconnerie= factor(DF$Maconnerie, level=L)
+with(data = DF, boxplot(foyer~Maconnerie,cex=.5,col=grey(.8)))
+
+reg_Maconnerie= glm(foyer~Maconnerie,data = DF,family = binomial(link = "logit"))
+summary(reg_Maconnerie)
+
+DF$Maconnerie = relevel(DF$Maconnerie,"BrkFace")
+with(data = DF, boxplot(foyer~Maconnerie,cex=.5,col=grey(.8)))
+
+reg_Maconnerie= glm(foyer~Maconnerie,data = DF,family = binomial(link = "logit"))
+summary(reg_Maconnerie)
+
+library(car)
+linearHypothesis(reg_Maconnerie, c("Maconnerie = 0",
+                             "MaconnerieBrkCmn = 0"))
+
+levels(DF$Maconnerie) = c("A","B","A","C","A")
+DF$Maconnerie = relevel(DF$Maconnerie,"B")
+with(data = DF, boxplot(foyer~Maconnerie,cex=.5,col=grey(.8)))
+
+reg_Maconnerie= glm(foyer~Maconnerie,data = DF,family = binomial(link = "logit"))
+summary(reg_Maconnerie)
+```
+Enfin, nous avons réussi à réduire le nombre de modalités pour la variable Maconnerie et nous nous retrouvons avec les trois sous-groupes suivants : MaconnerieA, MaconnerieB, Maconnerie C. Par ailleurs, nous constatons qu’elle s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+Où 
+
+MaconnerieA = {BrkFace,    , BrkCmn}
+
+MaconnerieB = {None}
+
+MaconnerieC = {Stone}
+
+
+### (1.1.12) Ext_Qualite
+
+Par la suite, nous allons procéder au regroupement de la variable Ext_Qualite similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald. 
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Ext_Qualite),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Ext_Qualite= factor(DF$Ext_Qualite, level=L)
+with(data = DF, boxplot(foyer~Ext_Qualite,cex=.5,col=grey(.8)))
+
+reg_Ext_Qualite= glm(foyer~Ext_Qualite,data = DF,family = binomial(link = "logit"))
+summary(reg_Ext_Qualite)
+
+library(car)
+linearHypothesis(reg_Ext_Qualite, c("Ext_QualiteTA = 0"))
+
+levels(DF$Ext_Qualite) = c(rep("A",2),"B","C")
+DF$Ext_Qualite = relevel(DF$Ext_Qualite,"A")
+with(data = DF, boxplot(foyer~Ext_Qualite,cex=.5,col=grey(.8)))
+reg_Ext_Qualite= glm(foyer~Ext_Qualite,data = DF,family = binomial(link = "logit"))
+summary(reg_Ext_Qualite)
+```
+Enfin, nous avons réussi à réduire le nombre de modalités pour la variable Ext_Qualite et nous nous retrouvons avec les trois sous-groupes suivants : Ext_QualiteA, Ext_QualiteB, Ext_QualiteC. Par ailleurs, nous constatons qu’elle s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+Où 
+
+Ext_QualiteA = {Fa, TA}
+
+Ext_QualiteB = {Gd}
+
+Ext_QualiteC = {Ex}
+
+### (1.1.13) Ext_Condition
+
+Par la suite, nous allons procéder au regroupement de la variable Ext_Condition similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Ext_Condition),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Ext_Condition= factor(DF$Ext_Condition, level=L)
+with(data = DF, boxplot(foyer~Ext_Condition,cex=.5,col=grey(.8)))
+
+reg_Ext_Condition= glm(foyer~Ext_Condition,data = DF,family = binomial(link = "logit"))
+summary(reg_Ext_Condition)
+
+library(car)
+linearHypothesis(reg_Ext_Condition, c("Ext_ConditionFa = 0",
+                                    "Ext_ConditionGd = 0"))
+
+levels(DF$Ext_Condition) = c(rep("A",3),"B")
+DF$Ext_Qualite = relevel(DF$Ext_Condition,"A")
+with(data = DF, boxplot(foyer~Ext_Condition,cex=.5,col=grey(.8)))
+reg_Ext_Condition= glm(foyer~Ext_Condition,data = DF,family = binomial(link = "logit"))
+summary(reg_Ext_Condition)
+```
+Enfin, nous avons réussi à réduire le nombre de modalités pour la variable Ext_Condition et nous nous retrouvons avec les deux sous-groupes suivants : Ext_ConditionA, Ext_ConditionB. Par ailleurs, nous constatons qu’elle s’avère significative dans la régression logistique. De ce fait, cette variable est intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+Où 
+
+Ext_ConditionA = {Ex, Fa, Gd}
+
+Ext_ConditionB = {TA}
+
+
+### (1.1.14) Foundation
+
+Encore une fois, nous allons procéder au regroupement de la variable Foundation similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Foundation),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Foundation= factor(DF$Foundation, level=L)
+with(data = DF, boxplot(foyer~Foundation,cex=.5,col=grey(.8)))
+
+reg_Foundation= glm(foyer~Foundation,data = DF,family = binomial(link = "logit"))
+summary(reg_Foundation)
+
+library(car)
+linearHypothesis(reg_Foundation, c("FoundationStone = 0",
+                             "FoundationSlab = 0",
+                             "FoundationBrkTil = 0",
+                             "FoundationCBlock = 0"))
+
+levels(DF$Foundation) = c(rep("A",5),"B")
+DF$Foundation = relevel(DF$Foundation,"B")
+with(data = DF, boxplot(foyer~Foundation,cex=.5,col=grey(.8)))
+reg_Foundation= glm(foyer~Foundation,data = DF,family = binomial(link = "logit"))
+summary(reg_Foundation)
+```
+Enfin, nous avons réussi à réduire le nombre de modalités pour la variable Fondation et nous nous retrouvons avec les deux sous-groupes suivants : FondationA, FondationB. Par ailleurs, nous constatons qu’elle s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+Où 
+
+Fondation A = {Wood, Stone, Slab, BrkTil, CBlock}
+
+FondationB = {PConc}
+
+### (1.1.15) Chauffage 
+
+Par la suite, nous allons procéder au regroupement de la variable Chauffage similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Chauffage),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Chauffage= factor(DF$Chauffage, level=L)
+with(data = DF, boxplot(foyer~Chauffage,cex=.5,col=grey(.8)))
+
+reg_Chauffage= glm(foyer~Chauffage,data = DF,family = binomial(link = "logit"))
+summary(reg_Chauffage)
+
+library(car)
+linearHypothesis(reg_Chauffage, c("ChauffageGrav  = 0",
+                             "ChauffageGasW= 0"))
+levels(DF$Chauffage) = c(rep("A",3),"B")
+DF$Chauffage = relevel(DF$Chauffage,"A")
+with(data = DF, boxplot(foyer~Chauffage,cex=.5,col=grey(.8)))
+reg_Chauffage= glm(foyer~Chauffage,data = DF,family = binomial(link = "logit"))
+summary(reg_Chauffage)
+```
+Ainsi, nous avons réussi à réduire le nombre de modalités pour la variable Chauffage et nous nous retrouvons avec les deux sous-groupes suivants : ChauffageA, ChauffageB. Par ailleurs, nous constatons la variable Chauffage est n’est pas trop intéressante en raison de sa p-value légèrement élevée. Cependant, nous avons néanmoins décidé de la retenir au cas où elle pourrait soudainement devenir pertinente lorsqu’elle est combinée avec d’autres variables explicatives lors de la construction du modèle.
+
+Où 
+
+ChauffageA = {Wall, Grav, GasW}
+
+ChauffageB = {GasA}
+
+
+### (1.1.16) Chauff_Qualite 
+
+Ensuite, nous allons procéder au regroupement de la variable Chauff_Qualite similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Chauff_Qualite),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Chauff_Qualite= factor(DF$Chauff_Qualite, level=L)
+with(data = DF, boxplot(foyer~Chauff_Qualite,cex=.5,col=grey(.8)))
+
+reg_Chauff_Qualite= glm(foyer~Chauff_Qualite,data = DF,family = binomial(link = "logit"))
+summary(reg_Chauff_Qualite)
+
+library(car)
+linearHypothesis(reg_Chauff_Qualite, c("Chauff_QualiteTA = 0",
+                             "Chauff_QualiteGd = 0"))
+levels(DF$Chauff_Qualite) = c(rep("A",3),"B")
+DF$Chauff_Qualite = relevel(DF$Chauff_Qualite,"B")
+with(data = DF, boxplot(foyer~Chauff_Qualite,cex=.5,col=grey(.8)))
+
+reg_Chauff_Qualite= glm(foyer~Chauff_Qualite,data = DF,family = binomial(link = "logit"))
+summary(reg_Chauff_Qualite)
+```
+Enfin, nous avons réussi à réduire le nombre de modalités pour la variable Chauff_Qualite et nous nous retrouvons avec les deux sous-groupes suivants : Chauff_QualiteA, Chauff_QualiteB. Par ailleurs, nous constatons qu’elle s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+Où 
+
+Chauff_Qualite A = {Fa, TA, Gd}
+
+Chaff_QualiteB = {Ex}
+
+
+### (1.1.17) Electricite
+
+Par la suite, nous allons procéder au regroupement de la variable Electricite similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Electricite),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Electricite= factor(DF$Electricite, level=L)
+with(data = DF, boxplot(foyer~Electricite,cex=.5,col=grey(.8)))
+
+reg_Electricite = glm(foyer~Electricite,data = DF,family = binomial(link = "logit"))
+summary(reg_Electricite)
+
+library(car)
+linearHypothesis(reg_Electricite, c("ElectriciteMix = 0",
+                             "ElectriciteFuseA = 0",
+                             "ElectriciteFuseF = 0"))
+levels(DF$Electricite) = c(rep("A",4),"B")
+DF$Electricite = relevel(DF$Electricite,"A")
+with(data = DF, boxplot(foyer~Electricite,cex=.5,col=grey(.8)))
+
+reg_Electricite = glm(foyer~Electricite,data = DF,family = binomial(link = "logit"))
+summary(reg_Electricite)
+```
+Enfin, nous avons réussi à réduire le nombre de modalités pour la variable Electricite et nous nous retrouvons avec les deux sous-groupes suivants : ElectriciteA, ElectriciteB. Par ailleurs, nous constatons qu’elle s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+Où 
+
+ElectriciteA = {FuseP, Mix, FuseA, FuseF}
+
+ElectriciteB = {SBrkr}
+
+
+### (1.1.18) Cuisine_Qualite
+
+Par la suite, nous allons procéder au regroupement de la variable Cuisine_Qualite similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Cuisine_Qualite),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Cuisine_Qualite= factor(DF$Cuisine_Qualite, level=L)
+with(data = DF, boxplot(foyer~Cuisine_Qualite,cex=.5,col=grey(.8)))
+
+reg_Cuisine_Qualite= glm(foyer~Cuisine_Qualite,data = DF,family = binomial(link = "logit"))
+summary(reg_Cuisine_Qualite)
+
+library(car)
+linearHypothesis(reg_Cuisine_Qualite, c("Cuisine_QualiteTA = 0"))
+
+DF$Cuisine_Qualite = relevel(DF$Cuisine_Qualite,"Ex")
+with(data = DF, boxplot(foyer~Cuisine_Qualite,cex=.5,col=grey(.8)))
+reg_Cuisine_Qualite= glm(foyer~Cuisine_Qualite,data = DF,family = binomial(link = "logit"))
+summary(reg_Cuisine_Qualite)
+```
+Nous n’avons pas procédé au regroupement des modalités de la variable Cuisine_Qualite, car le statistique de Wald est légèrement élevé avec une p-value de 0.06327. Nous n’allons donc pas regrouper ces modalités. En revanche, nous allons tout simplement changer la modalité de référence à Cuisine_QualiteEx. Suite à cette petite modification, nous constatons que la variable Cuisine_Qualite s’avère très significative dans la régression logistique. Par conséquent, cette variable est très intéressante en raison de faible p-value et nous allons donc la retenir pour la construction du modèle. 
+
+### (1.1.19) Note 
+
+Cette fois-ci, nous allons procéder au regroupement de la variable Note similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Note),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Note= factor(DF$Note, level=L)
+with(data = DF, boxplot(foyer~Note,cex=.5,col=grey(.8)))
+
+reg_Note = glm(foyer~Note ,data = DF,family = binomial(link = "logit"))
+summary(reg_Note )
+
+library(car)
+linearHypothesis(reg_Note, c("NoteMaj2 = 0"))
+
+levels(DF$Note) = c(rep("A",2),"B","C","D","E","F")
+DF$Note = relevel(DF$Note,"C")
+with(data = DF, boxplot(foyer~Note,cex=.5,col=grey(.8)))
+
+reg_Note = glm(foyer~Note ,data = DF,family = binomial(link = "logit"))
+summary(reg_Note )
+
+library(car)
+linearHypothesis(reg_Note, c("NoteD  = 0",
+                             "NoteE = 0"))
+levels(DF$Note) = c("C","A","B",rep("C",2),"F")
+DF$Note = relevel(DF$Note,"A")
+with(data = DF, boxplot(foyer~Note,cex=.5,col=grey(.8)))
+
+reg_Note = glm(foyer~Note ,data = DF,family = binomial(link = "logit"))
+summary(reg_Note )
+
+library(car)
+linearHypothesis(reg_Note, c("NoteB  = 0",
+                             "NoteC = 0"))
+
+levels(DF$Note) = c(rep("A",3),"F")
+DF$Note = relevel(DF$Note,"F")
+with(data = DF, boxplot(foyer~Note,cex=.5,col=grey(.8)))
+
+reg_Note = glm(foyer~Note ,data = DF,family = binomial(link = "logit"))
+summary(reg_Note )
+```
+Ainsi, nous avons réussi à réduire le nombre de modalités pour la variable Note et nous nous retrouvons avec les deux sous-groupes suivants : NoteA, NoteF. Par ailleurs, nous constatons la variable Chauffage est n’est pas trop intéressante en raison de sa p-value légèrement élevée. Cependant, nous avons néanmoins décidé de la retenir au cas où elle pourrait soudainement devenir pertinente lorsqu’elle est combinée avec d’autres variables explicatives lors de la construction du modèle.
+
+Où 
+
+NoteA = {Sal, Maj2, Mod, Typ, Min2, Min1}
+
+NoteF = {Maj1}
+
+
+### (1.1.20) Allee 
+
+Par la suite, nous allons procéder au regroupement de la variable Allee similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Allee),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Allee= factor(DF$Allee, level=L)
+with(data = DF, boxplot(foyer~Allee,cex=.5,col=grey(.8)))
+
+reg_Allee= glm(foyer~Allee,data = DF,family = binomial(link = "logit"))
+summary(reg_Allee)
+
+DF$Allee = relevel(DF$Allee,"Y")
+with(data = DF, boxplot(foyer~Allee,cex=.5,col=grey(.8)))
+
+reg_Allee = glm(foyer~Allee ,data = DF,family = binomial(link = "logit"))
+summary(reg_Allee )
+
+library(car)
+linearHypothesis(reg_Allee, c("AlleeP  = 0"))
+
+levels(DF$Allee) = c("A","B","A")
+DF$Allee = relevel(DF$Allee,"B")
+with(data = DF, boxplot(foyer~Allee,cex=.5,col=grey(.8)))
+
+reg_Allee = glm(foyer~Allee ,data = DF,family = binomial(link = "logit"))
+summary(reg_Allee )
+
+```
+Enfin, nous avons réussi à réduire le nombre de modalités pour la variable Allee et nous nous retrouvons avec les deux sous-groupes suivants : AlleeA, AlleeB. Par ailleurs, nous constatons qu’elle s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+Où 
+
+AlleeA = {Y, P}
+
+AlleeB = {N}
+
+### (1.1.21) Vente_Type
+
+Encore une fois, nous allons procéder au regroupement de la variable Vente_Type similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Vente_Type),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Vente_Type= factor(DF$Vente_Type, level=L)
+with(data = DF, boxplot(foyer~Vente_Type,cex=.5,col=grey(.8)))
+
+reg_Vente_Type= glm(foyer~Vente_Type,data = DF,family = binomial(link = "logit"))
+summary(reg_Vente_Type)
+
+library(car)
+linearHypothesis(reg_Vente_Type, c("Vente_TypeConLD   = 0",
+                              "Vente_TypeCOD = 0",
+                              "Vente_TypeWD = 0",
+                              "Vente_TypeConLw = 0"))
+
+levels(DF$Vente_Type) = c(rep("A",5),"B","C","D","E")
+DF$Vente_Type = relevel(DF$Vente_Type,"B")
+with(data = DF, boxplot(foyer~Vente_Type,cex=.5,col=grey(.8)))
+
+reg_Vente_Type= glm(foyer~Vente_Type,data = DF,family = binomial(link = "logit"))
+summary(reg_Vente_Type)
+
+library(car)
+linearHypothesis(reg_Vente_Type, c("Vente_TypeC   = 0",
+                              "Vente_TypeD = 0",
+                              "Vente_TypeE = 0"))
+
+levels(DF$Vente_Type) = c("B","A",rep("B",3))
+DF$Vente_Type = relevel(DF$Vente_Type,"B")
+with(data = DF, boxplot(foyer~Vente_Type,cex=.5,col=grey(.8)))
+
+reg_Vente_Type= glm(foyer~Vente_Type,data = DF,family = binomial(link = "logit"))
+summary(reg_Vente_Type)
+```
+Enfin, nous avons réussi à réduire le nombre de modalités pour la variable Vente_Type et nous nous retrouvons avec les deux sous-groupes suivants : Vente_TypeA, Vente_TypeB. Par ailleurs, nous constatons qu’elle s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+Où 
+
+Vente_TypeA = {Oth, ConLD, COD, WD, ConLw}
+
+Vente_TypeB = {Con, New, CWD, ConLI}
+
+### (1.1.22) Vente_Condition 
+
+Par la suite, nous allons procéder au regroupement de la variable Vente_Condition similairement à la méthode utilisée pour combiner les modalités de la variable Zone, c’est-à-dire à l’aide des boîtes à moustaches et du test de Wald.
+
+```{r}
+A = with(data = DF, aggregate(foyer,by=list(Vente_Condition),FUN=mean))
+A = A[order(A$x),]
+L = as.character(A$Group.1)
+DF$Vente_Condition= factor(DF$Vente_Condition, level=L)
+with(data = DF, boxplot(foyer~Vente_Condition,cex=.5,col=grey(.8)))
+
+reg_Vente_Condition= glm(foyer~Vente_Condition,data = DF,family = binomial(link = "logit"))
+summary(reg_Vente_Condition)
+
+library(car)
+linearHypothesis(reg_Vente_Condition, c("Vente_ConditionAlloca = 0",
+                              "Vente_ConditionAbnorml = 0",
+                              "Vente_ConditionNormal = 0"))
+
+levels(DF$Vente_Condition) = c(rep("A",4),"B","C")
+DF$Vente_Condition = relevel(DF$Vente_Condition,"B")
+with(data = DF, boxplot(foyer~Vente_Condition,cex=.5,col=grey(.8)))
+
+reg_Vente_Condition= glm(foyer~Vente_Condition,data = DF,family = binomial(link = "logit"))
+summary(reg_Vente_Condition)
+
+library(car)
+linearHypothesis(reg_Vente_Condition, c("Vente_ConditionC = 0"))
+
+levels(DF$Vente_Condition) = c("B","A","B")
+DF$Vente_Condition = relevel(DF$Vente_Condition,"B")
+with(data = DF, boxplot(foyer~Vente_Condition,cex=.5,col=grey(.8)))
+
+reg_Vente_Condition= glm(foyer~Vente_Condition,data = DF,family = binomial(link = "logit"))
+summary(reg_Vente_Condition)
+```
+Enfin, nous avons réussi à réduire le nombre de modalités pour la variable Vente_Condition et nous nous retrouvons avec les deux sous-groupes suivants : Vente_ConditionA, Vente_ConditionB. Par ailleurs, nous constatons qu’elle s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+Où 
+
+Vente_ConditionA = {AdjLand, Alloca, Abnorml, Normal}
+
+Vente_ConditionB = {Family, Partial}
+
+### (1.1.23) Surface_Lot
+
+À partir de la variable Surface_Lot, les variables suivantes sont également de nature quantitative. De ce fait, il n’est pas nécessaire de faire un regroupement comme c’était le cas pour les variables catégorielles précédentes.  
+
+Remarque Surface_Lot: Nous avons ajouté un polynôme de degré 2 à la variable Surface_Lot afin d’améliorer la qualité de notre regression. Ainsi, nous constatons que la variable Surface_Lot s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+```{r}
+reg_Surface_Lot = glm(foyer~poly(Surface_Lot,2),data = DF,family = binomial(link = "logit"))
+summary(reg_Surface_Lot)
+```
+
+### (1.1.24) Int_Qualite
+
+Remarque Int_Qualite: Nous constatons que la variable Int_Qualite s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+```{r}
+reg_Int_Qualite  = glm(foyer~Int_Qualite,data = DF,family = binomial(link = "logit"))
+summary(reg_Int_Qualite )
+```
+
+
+### (1.1.25) Int_Condition
+
+Remarque Int_Condition: Nous avons ajouté des nœuds à la variable Int_Condition afin d’améliorer la qualité de notre regression. Ainsi, nous constatons que la variable Int_Condition s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+```{r}
+library(splines)
+reg_Int_Condition= glm(foyer~bs(Int_Condition,3),data = DF,family = binomial(link = "logit"))
+summary(reg_Int_Condition)
+```
+
+### (1.1.26) Construction_Annee
+
+Remarque Construction_Annee: Nous constatons que la variable Construction_Annee s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+```{r}
+reg_Construction_Annee= glm(foyer~Construction_Annee,data = DF,family = binomial(link = "logit"))
+summary(reg_Construction_Annee)
+```
+
+### (1.1.27) Renovation_Annee
+
+Remarque Renovation_Annee: Nous constatons que la variable Renovation_Annee s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+```{r}
+reg_Renovation_Annee = glm(foyer~Renovation_Annee,data = DF,family = binomial(link = "logit"))
+summary(reg_Renovation_Annee )
+```
+
+### (1.1.28) Surface_RdC 
+
+Remarque Surface_RdC: Nous constatons que la variable Surface_Rdc s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+```{r}
+reg_Surface_RdC  = glm(foyer~Surface_RdC ,data = DF,family = binomial(link = "logit"))
+summary(reg_Surface_RdC )
+```
+
+### (1.1.29) Surface_Etage 
+
+Remarque Surface_Etage: Nous avons ajouté un polynôme de degré 2 à la variable Surface_Etage afin d’améliorer la qualité de notre regression. Ainsi, nous constatons que la variable Surface_Etage s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+```{r}
+reg_Surface_Etage= glm(foyer~poly(Surface_Etage,2) ,data = DF,family = binomial(link = "logit"))
+summary(reg_Surface_Etage)
+
+```
+
+### (1.1.30) Surface_Autre
+
+Remarque Surface_Autre: Nous avons ajouté un polynôme de degré 2 à la variable Surface_Autre afin d’améliorer la qualité de notre regression. Cependant, nous constatons que la variable Surface_Autre ne s’avère pas significative dans la régression logistique. De ce fait, cette variable n’est pas intéressante en raison de sa p-value élevé et nous n’allons donc pas la retenir pour la construction du modèle.
+
+```{r}
+reg_Surface_Autre= glm(foyer~poly(Surface_Autre,2) ,data = DF,family = binomial(link = "logit"))
+summary(reg_Surface_Autre)
+```
+
+### (1.1.31) Toilettes
+
+Remarque Toilettes: Nous constatons que la variable Toillettes s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+```{r}
+reg_Toilettes= glm(foyer~Toilettes ,data = DF,family = binomial(link = "logit"))
+summary(reg_Toilettes)
+```
+
+### (1.1.32) Chambres
+
+Remarque Chambres: Nous avons ajouté des nœuds à la variable Chambres afin d’améliorer la qualité de notre regression. Ainsi, nous constatons que la variable Chambres s’avère significative dans la régression logistique. De ce fait, cette variable est intéressante en raison de sa p-value relativement faible et nous allons la retenir pour la construction du modèle.
+
+```{r}
+reg_Chambres= glm(foyer~bs(Chambres,3),data = DF,family = binomial(link = "logit"))
+summary(reg_Chambres)
+```
+
+### (1.1.33) Pieces 
+
+Remarque Pieces: Nous constatons que la variable Pieces s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+```{r}
+reg_Pieces= glm(foyer~Pieces,data = DF,family = binomial(link = "logit"))
+summary(reg_Pieces)
+```
+
+### (1.1.34) Garage_Ext_Surface
+
+Remarque Garage_Ext_Surface: Nous avons ajouté des nœuds à la variable Garage_Ext_Surface afin d’améliorer la qualité de notre regression. Ainsi, nous constatons que la variable Garage_Ext_Surface s’avère significative dans la régression logistique. De ce fait, cette variable est très intéressante en raison de sa faible p-value et nous allons la retenir pour la construction du modèle.
+
+```{r}
+reg_Garage_Ext_Surface= glm(foyer~bs(Garage_Ext_Surface,3),data = DF,family = binomial(link = "logit"))
+summary(reg_Garage_Ext_Surface)
+```
+
+### (1.1.35) Garage_Int_Surface 
+
+Remarque Garage_Int_Surface: Nous constatons que la variable Garage_Int_Surface ne s’avère pas significative dans la régression logistique. En effet, cette variable n’est pas très intéressante en raison de sa p-value trop élevée et nous n’allons pas la retenir pour la construction du modèle.
+
+```{r}
+reg_Garage_Int_Surface= glm(foyer~Garage_Int_Surface,data = DF,family = binomial(link = "logit"))
+summary(reg_Garage_Int_Surface)
+```
+
+### (1.1.36) Piscine_Surface 
+
+Remarque Piscine_Surface: Nous constatons que la variable Piscine_Surface ne s’avère pas significative dans la régression logistique. En effet, cette variable n’est pas très intéressante en raison de sa p-value trop élevée et nous n’allons pas la retenir pour la construction du modèle.
+
+```{r,warning=FALSE}
+reg_Piscine_Surface= glm(foyer~Piscine_Surface,data = DF,family = binomial(link = "logit"))
+summary(reg_Piscine_Surface)
+```
+
+### (1.1.37) Vente_Mois 
+
+Remarque Vente_Mois: Nous constatons que la variable Vente_Mois ne s’avère pas significative dans la régression logistique. En effet, cette variable n’est pas très intéressante en raison de sa p-value trop élevée et nous n’allons pas la retenir pour la construction du modèle.
+
+```{r}
+reg_Vente_Mois= glm(foyer~Vente_Mois,data = DF,family = binomial(link = "logit"))
+summary(reg_Vente_Mois)
+```
+
+### (1.1.38) Vente_Annee 
+
+Remarque Vente_Annee: Nous constatons que la variable Vente_Annee ne s’avère pas significative dans la régression logistique. En effet, cette variable n’est pas très intéressante en raison de sa p-value trop élevée et nous n’allons pas la retenir pour la construction du modèle.
+
+```{r}
+reg_Vente_Annee= glm(foyer~Vente_Annee,data = DF,family = binomial(link = "logit"))
+summary(reg_Vente_Annee)
+```
+
+### (1.1.39) Rue
+
+Remarque Rue : La variable Rue ne possède que deux modalités dont Grvl et Pave. Cette dernière modalié représente en effet 100% des maisons vendues dans la base de données. Par conséquent, nous ne pouvons malheureusement pas faire une régression logistique sous R. De ce fait, nous n’allons pas la retenir pour la construction du modèle.
+
+```{r}
+table(DF$Rue)
+```
+
+
+
+
+## (1.2) LISTES DE VARIABLES EXPLICATIVES RETENUES 
+
+En somme, nous sommes parvenus à effectivement réduire le nombre de variables explicatives susceptibles à être sélectionnées pour la construction du modèle. Voici donc une liste exhaustive des 31 variables explicatives retenues :
+
+- Zone
+- Forme
+- Configuration
+- Proxim_1
+- Logement
+- Style
+- Toit
+- Exterieur
+- Maconnerie
+- Ext_Qualite
+- Ext_Condition
+- Foundation
+- Chauffage
+- Chauff_Qualite
+- Electricite
+- Cuisine_Qualite
+- Note
+- Allee
+- Vente_Type
+- Vente_Condition
+- Surface_Lot
+- Int_Qualite
+- Int_Condition
+- Construction_Annee
+- Renovation_Annee
+- Surface_RdC
+- Surface_Etage
+- Toilettes
+- Chambres
+- Pieces
+- Garage_Ext_Surface
+
+Également, voici une liste exhaustive de variables explicatives rejetées :
+
+- Utilities
+- Proxim_2
+- Surface_Autre
+- Garage_Int_Surface
+- Piscine_Surface
+- Vente_Mois
+- Vente_Annee
+- Rue
+
+# PARTIE II
+
+Dans cette deuxième partie du projet, nous expliquerons de façon détaillée comment nous sommes parvenus à l’amélioration d’un modèle simple. Parallèlement, nous expliquerons également la démarche utilisée permettant de construire un second modèle plus complexe et d’illustrer les moyens de le simplifier.
+
+## (2.1) MODÈLE SIMPLE
+
+À priori, nous avons décidé de créer un modèle initial avec les variables Zone, Forme, Surface_RdC et Pieces, puisqu’elles nous semblaient être les plus intéressantes à inclure en raison de leur très faible p-value lorsqu’elles sont combinées ensembles. Pour améliorer notre modèle simple, nous allons tout simplement procédé par la méthode de pas à pas (Stepwise). Plus précisément, nous avons procédé par « Forwad selection » en ajoutant ou en retirant une variable explicative à la fois et en vérifiant également, à chaque modification, leur significativité dans la régression à l’aide d’un test Z, c’est-à-dire un test de statistique dans lequel la statistique de test suit une loi gaussienne sous l’hypothèse nulle. Par ailleurs, nous allons comparé à chaque étape leur indice AIC. Certes, nous désirons idéalement obtenir, à la fin, un indice AIC inférieur aux modèles précédents.
+
+```{r}
+modele_00 = glm(foyer~Zone
++ Forme
+#+ Configuration
+#+ Proxim_1
+#+ Logement
+#+ Style
+#+ Toit
+#+ Exterieur
+#+ Maconnerie
+#+ Ext_Qualite
+#+ Ext_Condition
+#+ Foundation
+#+ Chauffage
+#+ Chauff_Qualite
+#+ Electricite
+#+ Cuisine_Qualite
+#+ Note
+#+ Allee
+#+ Vente_Type
+#+ Vente_Condition
+#+ poly(Surface_Lot, 2)
+#+ Int_Qualite
+#+ bs(Int_Condition ,3)
+#+ Construction_Annee
+#+ Renovation_Annee
++ Surface_RdC
+#+ poly(Surface_Etage, 2)
+#+ Toilettes
+#+ bs(Chambres, 3)
++ Pieces
+#+ bs(Garage_Ext_Surface, 3)
+,data = DF, family = binomial(link = logit))
+
+summary(modele_00)
+
+AIC(modele_00)
+```
+
+### (2.1.1) Modele_01
+
+Remarque modele_01 : Nous avons ajouté la variable Logement, car elle s’avère très significative dans la régression logisitique selon le test Z. De plus, l'indice AIC a effectivement diminué.
+
+```{r}
+modele_01 = glm(foyer~Zone
++ Forme
+#+ Configuration
+#+ Proxim_1
++ Logement
+#+ Style
+#+ Toit
+#+ Exterieur
+#+ Maconnerie
+#+ Ext_Qualite
+#+ Ext_Condition
+#+ Foundation
+#+ Chauffage
+#+ Chauff_Qualite
+#+ Electricite
+#+ Cuisine_Qualite
+#+ Note
+#+ Allee
+#+ Vente_Type
+#+ Vente_Condition
+#+ poly(Surface_Lot, 2)
+#+ Int_Qualite
+#+ bs(Int_Condition ,3)
+#+ Construction_Annee
+#+ Renovation_Annee
++ Surface_RdC
+#+ poly(Surface_Etage, 2)
+#+ Toilettes
+#+ bs(Chambres, 3)
++ Pieces
+#+ bs(Garage_Ext_Surface, 3)
+,data = DF, family = binomial(link = logit))
+
+summary(modele_01)
+
+AIC(modele_01)
+```
+
+### (2.1.2) Modele_02
+
+Remarque modele_02 : Nous avons ajouté la variable Sytle, car elle s’avère très significative dans la régression logisitique selon le test Z. De plus, l'indice AIC a effectivement diminué.
+
+```{r}
+modele_02 = glm(foyer~Zone
++ Forme
+#+ Configuration
+#+ Proxim_1
++ Logement
++ Style
+#+ Toit
+#+ Exterieur
+#+ Maconnerie
+#+ Ext_Qualite
+#+ Ext_Condition
+#+ Foundation
+#+ Chauffage
+#+ Chauff_Qualite
+#+ Electricite
+#+ Cuisine_Qualite
+#+ Note
+#+ Allee
+#+ Vente_Type
+#+ Vente_Condition
+#+ poly(Surface_Lot, 2)
+#+ Int_Qualite
+#+ bs(Int_Condition ,3)
+#+ Construction_Annee
+#+ Renovation_Annee
++ Surface_RdC
+#+ poly(Surface_Etage, 2)
+#+ Toilettes
+#+ bs(Chambres, 3)
++ Pieces
+#+ bs(Garage_Ext_Surface, 3)
+,data = DF, family = binomial(link = logit))
+
+summary(modele_02)
+
+AIC(modele_02)
+```
+
+### (2.1.3) Modele_03
+
+Remarque modele_03 : Nous avons ajouté la variable Exterieur, car elle s’avère significative dans la régression logisitique selon le test Z. De plus, l'indice AIC a effectivement diminué.
+
+```{r}
+modele_03 = glm(foyer~Zone
++ Forme
+#+ Configuration
+#+ Proxim_1
++ Logement
++ Style
+#+ Toit
++ Exterieur
+#+ Maconnerie
+#+ Ext_Qualite
+#+ Ext_Condition
+#+ Foundation
+#+ Chauffage
+#+ Chauff_Qualite
+#+ Electricite
+#+ Cuisine_Qualite
+#+ Note
+#+ Allee
+#+ Vente_Type
+#+ Vente_Condition
+#+ poly(Surface_Lot, 2)
+#+ Int_Qualite
+#+ bs(Int_Condition ,3)
+#+ Construction_Annee
+#+ Renovation_Annee
++ Surface_RdC
+#+ poly(Surface_Etage, 2)
+#+ Toilettes
+#+ bs(Chambres, 3)
++ Pieces
+#+ bs(Garage_Ext_Surface, 3)
+,data = DF, family = binomial(link = logit))
+
+summary(modele_03)
+
+AIC(modele_03)
+```
+
+### (2.1.4) Modele_04
+
+Remarque modele_04 : Nous avons ajouté la variable Maconnerie, car elle s’avère significative dans la régression logisitique selon le test Z. De plus, l'indice AIC a effectivement diminué.
+
+```{r}
+modele_04 = glm(foyer~Zone
++ Forme
+#+ Configuration
+#+ Proxim_1
++ Logement
++ Style
+#+ Toit
++ Exterieur
++ Maconnerie
+#+ Ext_Qualite
+#+ Ext_Condition
+#+ Foundation
+#+ Chauffage
+#+ Chauff_Qualite
+#+ Electricite
+#+ Cuisine_Qualite
+#+ Note
+#+ Allee
+#+ Vente_Type
+#+ Vente_Condition
+#+ poly(Surface_Lot, 2)
+#+ Int_Qualite
+#+ bs(Int_Condition ,3)
+#+ Construction_Annee
+#+ Renovation_Annee
++ Surface_RdC
+#+ poly(Surface_Etage, 2)
+#+ Toilettes
+#+ bs(Chambres, 3)
++ Pieces
+#+ bs(Garage_Ext_Surface, 3)
+,data = DF, family = binomial(link = logit))
+
+summary(modele_04)
+
+AIC(modele_04)
+```
+### (2.1.5) Modele_05
+
+Remarque modele_05 : Nous avons ajouté la variable Note, car elle s’avère significative dans la régression logisitique selon le test Z. De plus, l'indice AIC a effectivement diminué.
+
+```{r}
+modele_05 = glm(foyer~Zone
++ Forme
+#+ Configuration
+#+ Proxim_1
++ Logement
++ Style
+#+ Toit
++ Exterieur
++ Maconnerie
+#+ Ext_Qualite
+#+ Ext_Condition
+#+ Foundation
+#+ Chauffage
+#+ Chauff_Qualite
+#+ Electricite
+#+ Cuisine_Qualite
++ Note
+#+ Allee
+#+ Vente_Type
+#+ Vente_Condition
+#+ poly(Surface_Lot, 2)
+#+ Int_Qualite
+#+ bs(Int_Condition ,3)
+#+ Construction_Annee
+#+ Renovation_Annee
++ Surface_RdC
+#+ poly(Surface_Etage, 2)
+#+ Toilettes
+#+ bs(Chambres, 3)
++ Pieces
+#+ bs(Garage_Ext_Surface, 3)
+,data = DF, family = binomial(link = logit))
+
+summary(modele_05)
+
+AIC(modele_05)
+```
+### (2.1.6) Modele_06
+
+Remarque modele_06 : Nous avons ajouté la variable Allee, car elle s’avère significative dans la régression logisitique selon le test Z. De plus, l'indice AIC a effectivement diminué.
+
+```{r}
+modele_06 = glm(foyer~Zone
++ Forme
+#+ Configuration
+#+ Proxim_1
++ Logement
++ Style
+#+ Toit
++ Exterieur
++ Maconnerie
+#+ Ext_Qualite
+#+ Ext_Condition
+#+ Foundation
+#+ Chauffage
+#+ Chauff_Qualite
+#+ Electricite
+#+ Cuisine_Qualite
++ Note
++ Allee
+#+ Vente_Type
+#+ Vente_Condition
+#+ poly(Surface_Lot, 2)
+#+ Int_Qualite
+#+ bs(Int_Condition ,3)
+#+ Construction_Annee
+#+ Renovation_Annee
++ Surface_RdC
+#+ poly(Surface_Etage, 2)
+#+ Toilettes
+#+ bs(Chambres, 3)
++ Pieces
+#+ bs(Garage_Ext_Surface, 3)
+,data = DF, family = binomial(link = logit))
+
+summary(modele_06)
+
+AIC(modele_06)
+```
+
+### (2.1.7) Modele_07
+
+Remarque modele_07 : Nous avons ajouté la variable Int_Qualite, car elle s’avère très significative dans la régression logisitique selon le test Z. De plus, l'indice AIC a effectivement diminué.
+
+```{r}
+modele_07 = glm(foyer~Zone
++ Forme
+#+ Configuration
+#+ Proxim_1
++ Logement
++ Style
+#+ Toit
++ Exterieur
++ Maconnerie
+#+ Ext_Qualite
+#+ Ext_Condition
+#+ Foundation
+#+ Chauffage
+#+ Chauff_Qualite
+#+ Electricite
+#+ Cuisine_Qualite
++ Note
++ Allee
+#+ Vente_Type
+#+ Vente_Condition
+#+ poly(Surface_Lot, 2)
++ Int_Qualite
+#+ bs(Int_Condition ,3)
+#+ Construction_Annee
+#+ Renovation_Annee
++ Surface_RdC
+#+ poly(Surface_Etage, 2)
+#+ Toilettes
+#+ bs(Chambres, 3)
++ Pieces
+#+ bs(Garage_Ext_Surface, 3)
+,data = DF, family = binomial(link = logit))
+
+summary(modele_07)
+
+AIC(modele_07)
+```
+### (2.1.8) Modele_08
+
+Remarque modele_08 : Nous avons ajouté la variable Construction_Annee, car elle s’avère significative dans la régression logisitique selon le test Z. De plus, l'indice AIC a effectivement diminué.
+
+```{r}
+modele_08 = glm(foyer~Zone
++ Forme
+#+ Configuration
+#+ Proxim_1
++ Logement
++ Style
+#+ Toit
++ Exterieur
++ Maconnerie
+#+ Ext_Qualite
+#+ Ext_Condition
+#+ Foundation
+#+ Chauffage
+#+ Chauff_Qualite
+#+ Electricite
+#+ Cuisine_Qualite
++ Note
++ Allee
+#+ Vente_Type
+#+ Vente_Condition
+#+ poly(Surface_Lot, 2)
++ Int_Qualite
+#+ bs(Int_Condition ,3)
++ Construction_Annee
+#+ Renovation_Annee
++ Surface_RdC
+#+ poly(Surface_Etage, 2)
+#+ Toilettes
+#+ bs(Chambres, 3)
++ Pieces
+#+ bs(Garage_Ext_Surface, 3)
+,data = DF, family = binomial(link = logit))
+
+summary(modele_08)
+
+AIC(modele_08)
+```
+
+### (2.1.9) Modele_09
+
+Remarque modele_09 : Nous avons ajouté la variable Surface_Etage, car elle s’avère très significative dans la régression logisitique selon le test Z. De plus, l'indice AIC a effectivement diminué.
+
+```{r}
+modele_09 = glm(foyer~Zone
++ Forme
+#+ Configuration
+#+ Proxim_1
++ Logement
++ Style
+#+ Toit
++ Exterieur
++ Maconnerie
+#+ Ext_Qualite
+#+ Ext_Condition
+#+ Foundation
+#+ Chauffage
+#+ Chauff_Qualite
+#+ Electricite
+#+ Cuisine_Qualite
++ Note
++ Allee
+#+ Vente_Type
+#+ Vente_Condition
+#+ poly(Surface_Lot, 2)
++ Int_Qualite
+#+ bs(Int_Condition ,3)
++ Construction_Annee
+#+ Renovation_Annee
++ Surface_RdC
++ poly(Surface_Etage, 2)
+#+ Toilettes
+#+ bs(Chambres, 3)
++ Pieces
+#+ bs(Garage_Ext_Surface, 3)
+,data = DF, family = binomial(link = logit))
+
+summary(modele_09)
+
+AIC(modele_09)
+```
+
+### (2.1.10) Modele_10
+
+Remarque modele_10 : Nous avons retiré la variable Style, car c'était la variable la moins significative dans la régression logisitique selon le test Z. En retirant cette variable, l'indice AIC a effectivement diminué.
+
+```{r}
+modele_10 = glm(foyer~Zone
++ Forme
+#+ Configuration
+#+ Proxim_1
++ Logement
+#+ Style
+#+ Toit
++ Exterieur
++ Maconnerie
+#+ Ext_Qualite
+#+ Ext_Condition
+#+ Foundation
+#+ Chauffage
+#+ Chauff_Qualite
+#+ Electricite
+#+ Cuisine_Qualite
++ Note
++ Allee
+#+ Vente_Type
+#+ Vente_Condition
+#+ poly(Surface_Lot, 2)
++ Int_Qualite
+#+ bs(Int_Condition ,3)
++ Construction_Annee
+#+ Renovation_Annee
++ Surface_RdC
++ poly(Surface_Etage, 2)
+#+ Toilettes
+#+ bs(Chambres, 3)
++ Pieces
+#+ bs(Garage_Ext_Surface, 3)
+,data = DF, family = binomial(link = logit))
+
+summary(modele_10)
+
+AIC(modele_10)
+```
+
+### (2.1.11) Modele_11
+
+Remarque modele_11 : Nous avons retiré la variable Pieces, car c'était la variable la moins significative dans la régression logisitique selon le test Z. En retirant cette variable, l'indice AIC a effectivement diminué.
+
+```{r}
+modele_11 = glm(foyer~Zone
++ Forme
+#+ Configuration
+#+ Proxim_1
++ Logement
+#+ Style
+#+ Toit
++ Exterieur
++ Maconnerie
+#+ Ext_Qualite
+#+ Ext_Condition
+#+ Foundation
+#+ Chauffage
+#+ Chauff_Qualite
+#+ Electricite
+#+ Cuisine_Qualite
++ Note
++ Allee
+#+ Vente_Type
+#+ Vente_Condition
+#+ poly(Surface_Lot, 2)
++ Int_Qualite
+#+ bs(Int_Condition ,3)
++ Construction_Annee
+#+ Renovation_Annee
++ Surface_RdC
++ poly(Surface_Etage, 2)
+#+ Toilettes
+#+ bs(Chambres, 3)
+#+ Pieces
+#+ bs(Garage_Ext_Surface, 3)
+,data = DF, family = binomial(link = logit))
+
+summary(modele_11)
+
+AIC(modele_11)
+```
+### (2.1.12) Modele_12
+
+Remarque modele_12 : Nous avons réduit le degré du polynôme de la variable Surface_Etage à 1, car c'était la variable la moins significative dans la régression logisitique selon le test Z. En modifiant cette variable, l'indice AIC a effectivement diminué et de plus, toutes les variables explicatives s'avère maintenant significative dans la régression logisitique selon le test Z.
+
+
+```{r}
+modele_12 = glm(foyer~Zone
++ Forme
+#+ Configuration
+#+ Proxim_1
++ Logement
+#+ Style
+#+ Toit
++ Exterieur
++ Maconnerie
+#+ Ext_Qualite
+#+ Ext_Condition
+#+ Foundation
+#+ Chauffage
+#+ Chauff_Qualite
+#+ Electricite
+#+ Cuisine_Qualite
++ Note
++ Allee
+#+ Vente_Type
+#+ Vente_Condition
+#+ poly(Surface_Lot, 2)
++ Int_Qualite
+#+ bs(Int_Condition ,3)
++ Construction_Annee
+#+ Renovation_Annee
++ Surface_RdC
++ poly(Surface_Etage, 1)
+#+ Toilettes
+#+ bs(Chambres, 3)
+#+ Pieces
+#+ bs(Garage_Ext_Surface, 3)
+,data = DF, family = binomial(link = logit))
+
+summary(modele_12)
+
+AIC(modele_12)
+```
+
+Ainsi, nous sommes abouti au modele_12 pour le modèle simple. De plus, elle a le AIC le plus faible.
+
+## (2.2) MODÈLE COMPLEXE
+
+Contrairement au modèle simple, l’idée du modèle complexe est de partir avec une régression sur toutes les variables. Par la suite, en procédant par la méthode Stepwise, on enlève une à une les variables explicatives en minimisant leur indice AIC à chaque étape. En effet, la fonction step du logiciel R permet d’automatiser la procédure rigoureuse de la méthode Stepwise et compare également les combinaisons obtenues dans les deux directions, c’est-à-dire par « Forwad selection » et par « Backward selection ». De ce fait, nous allons simplifier notre modèle complexe par la méthode Stepwise en utilisant la fonction Step. Par ailleurs, nous allons également inclure les variables explicatives qui n'étaient pas retenues dans la première partie exploratoire au cas où elles pourraient soudainement devenir pertinente lorsqu’elle est combinée avec d’autres variables explicatives lors de la construction du modèle complexe via la fonction step sous R.
+
+```{r,warning=FALSE}
+
+modele_cmplx = glm(foyer~Zone
++ Forme
++ Configuration
++ Proxim_1
++ Logement
++ Style
++ Toit
++ Exterieur
++ Maconnerie
++ Ext_Qualite
++ Ext_Condition
++ Foundation
++ Chauffage
++ Chauff_Qualite
++ Electricite
++ Cuisine_Qualite
++ Note
++ Allee
++ Vente_Type
++ Vente_Condition
++ poly(Surface_Lot, 2)
++ Int_Qualite
++ bs(Int_Condition ,3)
++ Construction_Annee
++ Renovation_Annee
++ Surface_RdC
++ poly(Surface_Etage, 1)
++ Toilettes
++ bs(Chambres, 3)
++ Pieces
++ bs(Garage_Ext_Surface, 3)
+  +Utilities
+  +Proxim_2
+  +Surface_Autre
+  +Garage_Int_Surface
+  +Piscine_Surface
+  +Vente_Mois
+  +Vente_Annee
+  
+,data = DF, family = binomial(link = logit))
+
+summary(modele_cmplx)
+
+AIC(modele_cmplx)
+
+modele_step_AIC=step(modele_cmplx,direction = "both",trace=FALSE,k=2)
+summary(modele_step_AIC)
+
+AIC(modele_step_AIC)
+```
+
+# PARTIE III
+
+Dans cette dernière partie, nous allons comparer les courbes ROC, ainsi que les vauleurs AUC des deux modèles obtenus.
+
+La fonction d’efficacité du récepteur (courbe ROC) est un graphique qui permet de mettre en évidence la performance d’un modèle de classification. Notamment, la courbe ROC nous donne une représentation visuelle du taux de vrais positifs en fonction du taux de faux positifs. La valeur du AUC, quant à elle, correspond tout simplement à l’aire sous la courbe ROC. De ce fait, la courbe ROC et son AUC sont essentiellement des outils statistiques qui nous permettent de comparer différents modèles de classification afin de déterminer lequel est relativement meilleur. En effet, de manière générale, le modèle idéal correspond à celui qui possède la courbe ROC la plus éloignée au-dessus de la diagonale et par conséquent, le modèle ayant une valeur AUC se rapprochant de 1.
+
+## (3.1) MODÈLE SIMPLE COURBE ROC ET AUC
+```{r}
+library(pROC)
+par(pty="s")
+roc(DF$foyer,modele_12$fitted.values, plot=TRUE, legacy.axes=TRUE, main="Courbe ROC et AUC du modèle simple", xlab="False Positive Rate", ylab="True Positive Rate", col="blue", lwd=4, print.auc=TRUE)
+```
+
+## (3.2) MODÈLE COMPLEXE COURBE ROC ET AUC
+```{r}
+library(pROC)
+par(pty="s")
+roc(DF$foyer,modele_step_AIC$fitted.values, plot=TRUE, legacy.axes=TRUE, main="Courbe ROC et AUC du modèle complexe",xlab="False Positive Rate", ylab="True Positive Rate", col="Red", lwd=4, print.auc=TRUE)
+```
+
+## (3.3) COMPARAISON COURBE ROC ET AUC DES DEUX MODÈLES
+
+```{r}
+library(pROC)
+par(pty="s")
+roc(DF$foyer,modele_12$fitted.values, plot=TRUE, legacy.axes=TRUE, main="Comparaison des Courbes ROC et des AUC des modèles obtenus",xlab="False Positive Rate", ylab="True Positive Rate", col="blue", lwd=4, print.auc=TRUE)
+plot.roc(DF$foyer,modele_step_AIC$fitted.values, col="Red", lwd=4, print.auc=TRUE, add=TRUE, print.auc.y=0.4)
+legend("bottomright", legend = c("Modèle Simple","Modèle Complexe"),col = c("blue","Red"), lwd = 4)
+```
+
+# CONCLUSION
+
+En somme, nous constatons que la courbe ROC du modèle complexe représentée en rouge vif est clairement plus éloignée de la diagonale comparativement à celle du modèle simple qui est elle représentée en bleu. Notamment, la valeur AUC du modèle complexe est plus élevée que celle du modèle simple (0.879 vs 0.857). De plus, le modèle complexe à un indice AIC inférieur à celui du modèle simple (679.36 vs 701.41)  De ce fait, selon ces critères, nous considérons le modèle complexe comme étant le meilleur modèle.
+
+
+
+
+
+
